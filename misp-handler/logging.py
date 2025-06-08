@@ -29,13 +29,3 @@ class CloudWatchFormatter(logging.Formatter):
             log_entry.update(extra_fields)
 
         return json.dumps(log_entry)
-
-
-class CloudWatchLogger:
-
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(os.getenv("LOG_LEVEL", "INFO").upper())
-        handler = logging.StreamHandler()
-        handler.setFormatter(CloudWatchFormatter())
-        self.logger.addHandler(handler)
