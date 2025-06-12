@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Optional, List, Dict, Tuple
 
 from pymisp import PyMISP
 
@@ -166,3 +166,111 @@ class MispThreatFeedProcessor:
                 },
             )
             return 0
+
+    def get_events_batch(
+        self, page: int = 1, batch_size: Optional[int] = None
+    ) -> Tuple[List[Dict[str, Any]], bool]:
+        """
+        Get a batch of events for processing using MISP's 1-indexed pagination.
+
+        Args:
+            page: Page number (1-indexed, starts from 1)
+            batch_size: Number of events to fetch (defaults to max_events_per_instance config)
+
+        Returns:
+            Tuple of (events_list, has_more_events)
+
+        Raises:
+            Exception: If API call fails or returns errors
+        """
+        # Initialize variables before try block to avoid "possibly unbound" errors
+        config = MC()
+        effective_batch_size = batch_size or config.max_events_per_instance
+        sync_hours = self.last_sync_hours
+
+        try:
+            self.logger.info(
+                f"Fetching events batch - page {page}, size {effective_batch_size}",
+                extra={
+                    "extra_fields": {
+                        "page": page,
+                        "batch_size": effective_batch_size,
+                        "sync_hours": sync_hours,
+                        "request_id": self.request_id,
+                    }
+                },
+            )
+
+            # Fetch events with MISP's 1-indexed pagination
+            events_response = self.misp.search_index(
+                timestamp=f"{sync_hours}h",
+                pythonify=False,  # This ensures we get List[Dict[str, Any]]
+                limit=effective_batch_size,
+                page=page,  # MISP uses 1-indexed pagination
+            )
+
+            # Type guard for error response
+            if isinstance(events_response, dict) and "errors" in events_response:
+                self.logger.error(
+                    f"Error getting events batch: {events_response['errors']}",
+                    extra={
+                        "extra_fields": {
+                            "page": page,
+                            "batch_size": effective_batch_size,
+                            "request_id": self.request_id,
+                        }
+                    },
+                )
+                raise Exception(f"MISP API error: {events_response['errors']}")
+
+            # Type guard for successful list response
+            # Since pythonify=False, this will be List[Dict[str, Any]]
+            if isinstance(events_response, list):
+                # Type cast to satisfy pylance
+                # we know this is List[Dict[str, Any]] due to pythonify=False
+                events_list: List[Dict[str, Any]] = events_response  # type: ignore[assignment]
+                has_more = len(events_list) == effective_batch_size
+
+                self.logger.info(
+                    f"Retrieved batch of {len(events_list)} events for page {page}",
+                    extra={
+                        "extra_fields": {
+                            "batch_size": len(events_list),
+                            "page": page,
+                            "has_more": has_more,
+                            "actual_events_returned": len(events_list),
+                            "expected_batch_size": effective_batch_size,
+                            "request_id": self.request_id,
+                        }
+                    },
+                )
+
+                return events_list, has_more
+
+            # Fallback for unexpected response types
+            self.logger.warning(
+                f"Unexpected response type from search_index: {type(events_response)}",
+                extra={
+                    "extra_fields": {
+                        "page": page,
+                        "batch_size": effective_batch_size,
+                        "response_type": str(type(events_response)),
+                        "request_id": self.request_id,
+                    }
+                },
+            )
+            return [], False
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to get events batch for page {page}: {str(e)}",
+                extra={
+                    "extra_fields": {
+                        "page": page,
+                        "batch_size": effective_batch_size,
+                        "request_id": self.request_id,
+                    }
+                },
+                exc_info=True,
+            )
+            raise

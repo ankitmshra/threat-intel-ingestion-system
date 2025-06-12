@@ -139,6 +139,10 @@ class MispConfig:
         self._sqs_queue_url: Optional[str] = None
         self._last_sync_hours: Optional[str] = None
         self._misp_key: Optional[str] = None
+        self._max_events_per_instance: Optional[int] = None
+        self._max_concurrent_instances: Optional[int] = None
+        self._retry_queue_url: Optional[str] = None
+        self._batch_processing_function_name: Optional[str] = None
 
     @property
     def misp_url(self) -> str:
@@ -208,17 +212,71 @@ class MispConfig:
                 raise
         return self._misp_key
 
-    def load_config(self) -> Dict[str, Union[str, bool]]:
+    @property
+    def max_events_per_instance(self) -> int:
+        """Maximum number of events each Lambda instance should process"""
+        if self._max_events_per_instance is None:
+            try:
+                value = self.parameter_store.get_parameter("max-events-per-instance")
+                self._max_events_per_instance = int(value)
+            except Exception as e:
+                self.logger.error(f"Failed to load max events per instance configuration: {str(e)}")
+                raise
+        return self._max_events_per_instance
+
+    @property
+    def max_concurrent_instances(self) -> int:
+        """Maximum number of concurrent Lambda instances that can be spawned"""
+        if self._max_concurrent_instances is None:
+            try:
+                value = self.parameter_store.get_parameter("max-concurrent-instances")
+                self._max_concurrent_instances = int(value)
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to load max concurrent instances configuration: {str(e)}"
+                )
+                raise
+        return self._max_concurrent_instances
+
+    @property
+    def retry_queue_url(self) -> str:
+        """SQS queue URL for failed batch retries"""
+        if self._retry_queue_url is None:
+            try:
+                self._retry_queue_url = self.parameter_store.get_parameter("retry-queue-url")
+            except Exception as e:
+                self.logger.error(f"Failed to load retry queue URL configuration: {str(e)}")
+                raise
+        return self._retry_queue_url
+
+    @property
+    def batch_processing_function_name(self) -> str:
+        """Lambda function name for batch processing"""
+        if self._batch_processing_function_name is None:
+            try:
+                self._batch_processing_function_name = self.parameter_store.get_parameter(
+                    "batch-processing-function-name"
+                )
+            except Exception as e:
+                self.logger.error(f"Failed to load batch processing function name: {str(e)}")
+                raise
+        return self._batch_processing_function_name
+
+    def load_config(self) -> Dict[str, Union[str, bool, int]]:
         """Load all configuration parameters as a dictionary"""
         self.logger.info("Loading all configuration parameters")
         try:
-            config_dict: Dict[str, Union[str, bool]] = {
+            config_dict: Dict[str, Union[str, bool, int]] = {
                 "misp_url": self.misp_url,
                 "misp_verify_cert": self.misp_verify_cert,
                 "s3_bucket": self.s3_bucket,
                 "sqs_queue_url": self.sqs_queue_url,
                 "last_sync_hours": self.last_sync_hours,
                 "misp_key": self.misp_key,
+                "max_events_per_instance": self.max_events_per_instance,
+                "max_concurrent_instances": self.max_concurrent_instances,
+                "retry_queue_url": self.retry_queue_url,
+                "batch_processing_function_name": self.batch_processing_function_name,
             }
             self.logger.info("Successfully loaded all configuration parameters")
             return config_dict
@@ -235,6 +293,10 @@ class MispConfig:
         self._sqs_queue_url = None
         self._last_sync_hours = None
         self._misp_key = None
+        self._max_events_per_instance = None
+        self._max_concurrent_instances = None
+        self._retry_queue_url = None
+        self._batch_processing_function_name = None
 
         # Clear the underlying manager caches using their public methods
         self.parameter_store.clear_cache()
